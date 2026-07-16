@@ -26,17 +26,21 @@ module RewindRewind
     # Default denylist of exception class NAMES that are dropped before capture.
     # These are common non-actionable framework errors — almost always triggered
     # by malformed/hostile client requests (bots sending junk, 4xx routing/parse
-    # failures) rather than bugs in the host application — so reporting them is
-    # pure noise. Mirrors sentry-ruby's `excluded_exceptions` default, plus the
-    # Rack multipart parse error that motivated this list.
+    # failures) rather than bugs in the host application.
+    #
+    # Whether these are "noise" depends on YOUR application, so RewindRewind does
+    # NOT drop any of them by default: silently dropping an exception that could
+    # be actionable is the one thing we never do. This is a SUGGESTED opt-in
+    # template — enable it when you know these are noise for your app:
+    #
+    #   config.excluded_exceptions = RewindRewind::Configuration::SUGGESTED_EXCLUDED_EXCEPTIONS
+    #   # or append:
+    #   config.excluded_exceptions += RewindRewind::Configuration::SUGGESTED_EXCLUDED_EXCEPTIONS
     #
     # Stored as plain strings (NOT constant references) on purpose: the core gem
     # must not require Rails or Rack to be loaded, and these classes may not be
     # defined in a given process. Matching is done by fully-qualified class name.
-    #
-    # Hosts can REPLACE this list (`config.excluded_exceptions = [...]`) or APPEND
-    # to it (`config.excluded_exceptions += [...]`) via {#excluded_exceptions=}.
-    DEFAULT_EXCLUDED_EXCEPTIONS = [
+    SUGGESTED_EXCLUDED_EXCEPTIONS = [
       "ActionController::BadRequest",
       "ActionController::RoutingError",
       "ActionController::UnknownFormat",
@@ -54,6 +58,10 @@ module RewindRewind
       "ActiveRecord::RecordNotFound",
       "Sinatra::NotFound"
     ].freeze
+
+    # Applied by default: nothing. Capture everything actionable and let triage
+    # (snooze/ignore) happen where it is visible and reversible.
+    DEFAULT_EXCLUDED_EXCEPTIONS = [].freeze
 
     # Hosts that may legitimately be addressed over plain http (the project key
     # never leaves the machine, so cleartext is acceptable for local dev).

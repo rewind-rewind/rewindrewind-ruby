@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ruby -Itest test/rewind_rewind_test.rb
+
+artifact="$(mktemp --suffix=.gem)"
+trap 'rm -f "$artifact"' EXIT
+
+gem build rewind_rewind.gemspec --output "$artifact"

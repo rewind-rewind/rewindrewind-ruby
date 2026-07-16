@@ -72,7 +72,7 @@ class RewindRewindTest < Minitest::Test
         raise "boom with a real backtrace"
       rescue StandardError => e
         assert_equal true, RewindRewind.capture_exception(
-          e, extra: { queue: "critical" }, user: { id: "u1", email: "u@x.com" }
+          e, extra: { queue: "critical" }, identity: { id: "u1", email: "u@x.com" }
         )
       end
 
@@ -89,7 +89,7 @@ class RewindRewindTest < Minitest::Test
       assert_equal "RuntimeError", body["exception"]["type"]
       assert_equal({ "queue" => "critical" }, body["extra"])
       assert_equal({ "service" => "worker" }, body["tags"])
-      assert_equal({ "id" => "u1", "email" => "u@x.com" }, body["user"])
+      assert_equal({ "id" => "u1", "email" => "u@x.com" }, body["identity"])
       assert body["timestamp"].is_a?(Integer)
 
       top = body["exception"]["stacktrace"].first
@@ -109,14 +109,14 @@ class RewindRewindTest < Minitest::Test
       end
 
       assert_equal true, RewindRewind.capture_event(
-        "job.finished", properties: { duration_ms: 123 }, distinct_id: "u1", source: "backend"
+        "job.finished", properties: { duration_ms: 123 }, identity_id: "u1", source: "backend"
       )
 
       body = requests[0][:body]
       assert_equal "/v1/events", requests[0][:path]
       assert_equal "job.finished", body["type"]
       assert_equal "production", body["environment"]
-      assert_equal "u1", body["distinct_id"]
+      assert_equal "u1", body["identity_id"]
       assert_equal "backend", body["source"]
       assert_equal({ "duration_ms" => 123, "service" => "worker" }, body["properties"])
     end
@@ -282,7 +282,7 @@ class RewindRewindTest < Minitest::Test
           items: [{ credit_card: "4111", label: "ok" }]
         },
         tags: { secret_token: "t", region: "us-east" },
-        user: { id: "u1", email: "u@x.com", session: "sess-123" },
+        identity: { id: "u1", email: "u@x.com", session: "sess-123" },
         request: { method: "GET", path: "/x", cookie: "sid=abc" }
       )
 
@@ -295,10 +295,10 @@ class RewindRewindTest < Minitest::Test
       assert_equal "ok", body["extra"]["items"][0]["label"]
       assert_equal "[FILTERED]", body["tags"]["secret_token"]
       assert_equal "us-east", body["tags"]["region"]
-      # user[:id]/email are intentional attribution and must survive.
-      assert_equal "u1", body["user"]["id"]
-      assert_equal "u@x.com", body["user"]["email"]
-      assert_equal "[FILTERED]", body["user"]["session"]
+      # identity[:id]/email are intentional attribution and must survive.
+      assert_equal "u1", body["identity"]["id"]
+      assert_equal "u@x.com", body["identity"]["email"]
+      assert_equal "[FILTERED]", body["identity"]["session"]
       assert_equal "[FILTERED]", body["request"]["cookie"]
       assert_equal "/x", body["request"]["path"]
     end
@@ -375,15 +375,34 @@ class RewindRewindTest < Minitest::Test
     end
   end
 
-  def test_default_denylist_excludes_action_controller_bad_request
+  def test_nothing_excluded_by_default
+    # Boundary: the SDK never silently drops a potentially-actionable exception.
+    # The default list is empty; the framework-4xx denylist is opt-in.
+    with_server(1) do |endpoint, requests|
+      RewindRewind.configure do |c|
+        c.api_key = "k"
+        c.endpoint = endpoint
+        c.environment = "production"
+      end
+
+      assert_empty RewindRewind::Configuration::DEFAULT_EXCLUDED_EXCEPTIONS
+      assert_equal true, RewindRewind.capture_exception(
+        ActionController::BadRequest.new("captured by default, not silently dropped")
+      )
+      assert_equal 1, requests.length
+    end
+  end
+
+  def test_suggested_denylist_excludes_when_opted_in
     with_server(0) do |endpoint, requests|
       RewindRewind.configure do |c|
         c.api_key = "k"
         c.endpoint = endpoint
         c.environment = "production"
-        # Point the default name at our stub so the real default list matches.
+        # Opt into the suggested template, plus point a stub at it so the
+        # name-based match fires against our local ActionController::BadRequest.
         c.excluded_exceptions =
-          RewindRewind::Configuration::DEFAULT_EXCLUDED_EXCEPTIONS +
+          RewindRewind::Configuration::SUGGESTED_EXCLUDED_EXCEPTIONS +
           ["RewindRewindTest::ActionController::BadRequest"]
       end
 

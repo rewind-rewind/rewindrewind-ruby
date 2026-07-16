@@ -25,7 +25,7 @@ module RewindRewind
     # Payload bags that carry caller-supplied data and are therefore run through
     # the sensitive-field scrubber before being POSTed. Everything else in the
     # payload is SDK-controlled metadata.
-    SCRUBBED_KEYS = %i[extra tags user request properties].freeze
+    SCRUBBED_KEYS = %i[extra tags identity request properties].freeze
 
     # @return [RewindRewind::Configuration]
     attr_reader :configuration
@@ -41,13 +41,13 @@ module RewindRewind
     # @param fingerprint [String, Array, nil] optional dedupe override
     # @param tags [Hash] merged over the configured tags
     # @param extra [Hash] arbitrary structured context
-    # @param user [Hash, nil] {id:, email:} (other keys allowed)
+    # @param identity [Hash, nil] {id:, email:} (other keys allowed)
     # @param request [Hash, nil] request context (method/path/url/...)
     # @param environment [String, nil] per-call environment override
     # @param release [String, nil] per-call release override
     # @return [Boolean] true on 2xx, false otherwise (never raises)
     def capture_exception(exception, level: "error", fingerprint: nil, tags: {},
-                          extra: {}, user: nil, request: nil, environment: nil,
+                          extra: {}, identity: nil, request: nil, environment: nil,
                           release: nil)
       if excluded_exception?(exception)
         log_dropped(exception)
@@ -68,7 +68,7 @@ module RewindRewind
           stacktrace: Backtrace.parse(safe_backtrace(exception), configuration, limit: MAX_FRAMES)
         },
         request: presence(request),
-        user: presence(user),
+        identity: presence(identity),
         tags: merged_tags(tags),
         extra: presence(extra)
       }
@@ -83,7 +83,7 @@ module RewindRewind
     #
     # @param type [String] event name (REQUIRED)
     # @return [Boolean] true on 2xx, false otherwise (never raises)
-    def capture_event(type, properties: {}, distinct_id: nil, anonymous_id: nil,
+    def capture_event(type, properties: {}, identity_id: nil, anonymous_id: nil,
                       source: nil, environment: nil, release: nil)
       raise ArgumentError, "event type is required" if blank?(type)
 
@@ -91,7 +91,7 @@ module RewindRewind
         type: type.to_s,
         environment: resolve_environment(environment),
         release: release || configuration.release,
-        distinct_id: distinct_id,
+        identity_id: identity_id,
         anonymous_id: anonymous_id,
         source: source,
         properties: merged_tags(properties)
@@ -229,7 +229,7 @@ module RewindRewind
       end
     end
 
-    # Redact sensitive values in the caller-supplied bags (extra/tags/user/
+    # Redact sensitive values in the caller-supplied bags (extra/tags/identity/
     # request/properties) before they leave the process. SDK-controlled
     # metadata (message, level, stacktrace, ...) is left untouched.
     def scrub_payload(payload)
@@ -243,7 +243,7 @@ module RewindRewind
 
     # Recursively walk hashes/arrays, replacing any hash value whose KEY matches
     # the denylist with FILTERED. Matching is by key name only, so intentional
-    # attribution like user[:id]/user[:email] survives (they aren't on the list).
+    # attribution like identity[:id]/identity[:email] survives (they aren't on the list).
     def scrub(value, pattern)
       case value
       when Hash
